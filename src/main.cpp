@@ -70,13 +70,34 @@ void setup() {
     }
     Serial.println("[OK] SPIFFS montato.");
 
-    file = new AudioFileSourceSPIFFS("/oh-no-mono.mp3");
+    // Lista file nel filesystem
+    Serial.println("--- File su SPIFFS ---");
+    File root = SPIFFS.open("/");
+    File f = root.openNextFile();
+    while (f) {
+        Serial.printf("  %s  (%d byte)\n", f.name(), f.size());
+        f = root.openNextFile();
+    }
+    Serial.println("----------------------");
+
+    Serial.printf("Heap libero: %d byte\n", ESP.getFreeHeap());
+
+    file = new AudioFileSourceSPIFFS("/test.mp3");
     if (!file->isOpen()) {
-        Serial.println("[ERRORE] File /oh-no-mono.mp3 non trovato.");
+        Serial.println("[ERRORE] File /test.mp3 non trovato.");
         return;
     }
+    Serial.printf("[OK] File aperto, dimensione: %d byte\n", (int)file->getSize());
+
+    // Leggi i primi 4 byte per verificare l'header MP3
+    uint8_t header[4];
+    file->read(header, 4);
+    Serial.printf("[DEBUG] Primi 4 byte: %02X %02X %02X %02X\n",
+        header[0], header[1], header[2], header[3]);
+    file->seek(0, SEEK_SET);  // torna all'inizio
 
     out = new RawI2SOutput();
+    Serial.printf("Heap dopo I2S init: %d byte\n", ESP.getFreeHeap());
 
     mp3 = new AudioGeneratorMP3();
     if (!mp3->begin(file, out)) {
