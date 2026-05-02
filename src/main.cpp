@@ -49,7 +49,7 @@ void setup() {
     out = new AudioOutputI2S();
     out->SetPinout(I2S_BCK, I2S_WS, I2S_DATA);
     out->SetOutputModeMono(true);
-    out->SetGain(0.5);
+    out->SetGain(4.0);  // massimo per test
 
     mp3 = new AudioGeneratorMP3();
     if (!mp3->begin(file, out)) {
