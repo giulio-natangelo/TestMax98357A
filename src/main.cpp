@@ -1,17 +1,15 @@
 #include <Arduino.h>
-#include <SPIFFS.h>
 #include <AudioGeneratorMP3.h>
-#include <AudioFileSourceSPIFFS.h>
+#include <AudioFileSourcePROGMEM.h>
+#include <AudioFileSourceBuffer.h>
 #include <AudioOutput.h>
 #include <driver/i2s.h>
+#include "oh_no_mono.h"
 
-// Pin MAX98357A → ESP32-S3
-#define I2S_WS   15  // LRC / Word Select
-#define I2S_BCK  16  // Bit Clock
-#define I2S_DATA 17  // DIN / Data
+#define I2S_WS   15
+#define I2S_BCK  16
+#define I2S_DATA 17
 
-// Output personalizzato: usa il driver I2S raw (che funziona)
-// invece dell'inizializzazione interna di AudioOutputI2S
 class RawI2SOutput : public AudioOutput {
 public:
     RawI2SOutput() {
@@ -35,80 +33,59 @@ public:
         i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
         i2s_set_pin(I2S_NUM_0, &pins);
     }
-
-    // Chiamato dal decoder quando cambia il sample rate dell'MP3
-    bool SetRate(int hz) override {
-        i2s_set_sample_rates(I2S_NUM_0, hz);
-        return true;
-    }
-
-    // Chiamato dal decoder per ogni campione stereo decodificato
+    bool begin() override { return true; }
+    bool SetRate(int hz) override { i2s_set_sample_rates(I2S_NUM_0, hz); return true; }
     bool ConsumeSample(int16_t sample[2]) override {
         int16_t buf[2] = { sample[LEFTCHANNEL], sample[RIGHTCHANNEL] };
         size_t written;
         i2s_write(I2S_NUM_0, buf, sizeof(buf), &written, portMAX_DELAY);
         return written == sizeof(buf);
     }
-
-    bool stop() override {
-        i2s_zero_dma_buffer(I2S_NUM_0);
-        return true;
-    }
+    bool stop() override { i2s_zero_dma_buffer(I2S_NUM_0); return true; }
 };
 
-AudioGeneratorMP3     *mp3;
-AudioFileSourceSPIFFS *file;
-RawI2SOutput          *out;
+static void mp3StatusCB(void*, int code, const char* str) {
+    Serial.printf("[MP3 STATUS] code=%d  %s\n", code, str ? str : "");
+}
+
+AudioGeneratorMP3      *mp3;
+AudioFileSourcePROGMEM *progmem;
+AudioFileSourceBuffer  *file;
+RawI2SOutput           *out;
 
 void setup() {
     Serial.begin(115200);
-    delay(5000);
+    delay(1000);
 
-    if (!SPIFFS.begin(true)) {
-        Serial.println("[ERRORE] Mount SPIFFS fallito.");
-        return;
-    }
-    Serial.println("[OK] SPIFFS montato.");
+    Serial.printf("Heap iniziale: %d byte\n", ESP.getFreeHeap());
 
-    // Lista file nel filesystem
-    Serial.println("--- File su SPIFFS ---");
-    File root = SPIFFS.open("/");
-    File f = root.openNextFile();
-    while (f) {
-        Serial.printf("  %s  (%d byte)\n", f.name(), f.size());
-        f = root.openNextFile();
-    }
-    Serial.println("----------------------");
+    // Verifica lettura PROGMEM
+    progmem = new AudioFileSourcePROGMEM(oh_no_mono, oh_no_mono_len);
+    uint8_t hdr[8];
+    progmem->read(hdr, 8);
+    Serial.printf("PROGMEM header: ");
+    for (int i = 0; i < 8; i++) Serial.printf("%02X ", hdr[i]);
+    Serial.println();
+    progmem->seek(0, SEEK_SET);
 
-    // Lettura diretta via SPIFFS (bypassa ESP8266Audio) per verificare il contenuto reale
-    {
-        File directFile = SPIFFS.open("/oh-no-mono.mp3", "r");
-        if (directFile) {
-            uint8_t buf[16];
-            directFile.read(buf, 16);
-            Serial.print("[DIRECT] Primi 16 byte: ");
-            for (int i = 0; i < 16; i++) Serial.printf("%02X ", buf[i]);
-            Serial.println();
-            directFile.close();
-        } else {
-            Serial.println("[DIRECT] File non apribile direttamente.");
-        }
-    }
-
-    file = new AudioFileSourceSPIFFS("/oh-no-mono.mp3");
-    if (!file->isOpen()) {
-        Serial.println("[ERRORE] File /oh-no-mono.mp3 non trovato.");
-        return;
-    }
+    // Buffer RAM tra PROGMEM e decoder (aiuta con la lettura a blocchi)
+    file = new AudioFileSourceBuffer(progmem, 4096);
 
     out = new RawI2SOutput();
+    Serial.printf("Heap dopo I2S: %d byte\n", ESP.getFreeHeap());
 
     mp3 = new AudioGeneratorMP3();
-    if (!mp3->begin(file, out)) {
-        Serial.println("[ERRORE] Impossibile avviare il decoder MP3.");
-        return;
+    mp3->RegisterStatusCB(mp3StatusCB, nullptr);
+    Serial.printf("Heap prima di begin(): %d byte\n", ESP.getFreeHeap());
+
+    bool ok = mp3->begin(file, out);
+    Serial.printf("begin() = %s  |  Heap: %d byte\n", ok ? "OK" : "FAIL", ESP.getFreeHeap());
+
+    if (!ok) {
+        Serial.println("[ERRORE] Decoder non avviato.");
+    } else {
+        Serial.println("[OK] Riproduzione avviata...");
     }
-    Serial.println("[OK] Riproduzione avviata...");
 }
 
 void loop() {
