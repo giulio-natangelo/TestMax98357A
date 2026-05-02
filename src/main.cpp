@@ -62,7 +62,7 @@ RawI2SOutput          *out;
 
 void setup() {
     Serial.begin(115200);
-    delay(1000);
+    delay(5000);
 
     if (!SPIFFS.begin(true)) {
         Serial.println("[ERRORE] Mount SPIFFS fallito.");
