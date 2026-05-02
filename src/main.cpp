@@ -82,9 +82,9 @@ void setup() {
 
     Serial.printf("Heap libero: %d byte\n", ESP.getFreeHeap());
 
-    file = new AudioFileSourceSPIFFS("/test.mp3");
+    file = new AudioFileSourceSPIFFS("/oh-no-mono.mp3");
     if (!file->isOpen()) {
-        Serial.println("[ERRORE] File /test.mp3 non trovato.");
+        Serial.println("[ERRORE] File /oh-no-mono.mp3 non trovato.");
         return;
     }
     Serial.printf("[OK] File aperto, dimensione: %d byte\n", (int)file->getSize());
